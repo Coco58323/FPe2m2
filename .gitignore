@@ -17,7 +17,6 @@ third-party/*
 third-party/cutlass
 *.make
 *.cmake
-*.txt
 *.sh
 exp_quant*
 act_scales*

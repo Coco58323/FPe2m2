@@ -1,0 +1,8 @@
+transformers==4.44.2
+torch==2.4.0+cu121
+sentencepiece==0.2.0
+wandb==0.18.0
+huggingface-hub==0.20.3
+accelerate==0.31.0
+datasets==2.20.0
+lm-eval @ git+https://github.com/EleutherAI/lm-evaluation-harness.git@9b0b15b1ccace3534ffbd13298c569869ce8eaf3
