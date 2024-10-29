@@ -28,7 +28,6 @@ download*
 clash*
 plot.py
 test.py
-*.md
 */.git
 /third-party/cutlass
 fake_quant/quant_Meta-Llama-3-8B
