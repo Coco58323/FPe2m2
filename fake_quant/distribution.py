@@ -1,7 +1,7 @@
 # %%
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-model = AutoModelForCausalLM.from_pretrained("/root/data/model/meta-llama/Llama-2-13b-hf")
+model = AutoModelForCausalLM.from_pretrained("/root/data/model/meta-llama/Llama-2-13b")
 # %%
 def retain_first_mantissa_bit(tensor):
     int_tensor = tensor.view(torch.int16)
@@ -249,7 +249,7 @@ def sym_quant_fpe1m3(w, groupsize=-1):
     w_sim = w_sim.reshape(w_shape)
     return w_sim
 
-def sym_quant_fpe2m2_ps(w, groupsize=-1,power_scale=1.2):
+def sym_quant_fpe2m2_ps(w, groupsize=-1,power_scale=0.5):
     fp8_scales = w.abs().max(dim=-1, keepdim=True)[0]
     fp8_scales.div_(torch.finfo(torch.float8_e4m3fn).max)
     w = w.div(fp8_scales).clamp(min=torch.finfo(torch.float8_e4m3fn).min, max=torch.finfo(torch.float8_e4m3fn).max).mul(fp8_scales)
@@ -345,7 +345,7 @@ def cosine_similarity_matrix(freq_matrix_1, freq_matrix_2):
 
 print("按行的余弦相似度:", cosine_similarity_matrix(frequency_matrix_1, frequency_matrix_2))
 # %%
-cnt=5
+cnt=1
 import matplotlib.pyplot as plt
 for name, param in model.named_parameters():
     if "lm_head" in name or "layer" not in name or 'norm' in name:
@@ -365,11 +365,17 @@ for name, param in model.named_parameters():
     # cnt_fpe1m3 = len(set(fpe1m3[0].detach().cpu().numpy().tolist()))
     # print(cnt_param, cnt_fpe3m1)
     # print(cnt_fpe2m2, cnt_fpe1m3)
-    # plt.hist(param[0].detach().cpu().numpy(), bins=5000)
-    # plt.show()
-    plt.hist(fpe3m1[0].detach().cpu().numpy(), bins=100,color='b')
-    plt.hist(fpe3m1_ps[0].detach().cpu().numpy(), bins=100,color='r',alpha=0.5)
+    pa = param[0].detach()
+    pa = pa / pa.abs().max()
+    plt.hist(pa.cpu().numpy(), bins=5000)
     plt.show()
+    pa = pa.abs().pow(0.5).mul(torch.sign(pa))
+    pa = pa.cpu().numpy()
+    plt.hist(pa, bins=5000)
+    plt.show()
+    # plt.hist(fpe3m1[0].detach().cpu().numpy(), bins=100,color='b')
+    # plt.hist(fpe3m1_ps[0].detach().cpu().numpy(), bins=100,color='r',alpha=0.5)
+    # plt.show()
     plt.hist(fpe2m2[0].detach().cpu().numpy(), bins=100,color='b')
     plt.hist(fpe2m2_ps[0].detach().cpu().numpy(), bins=100,color='r',alpha=0.5)
     plt.show()
@@ -387,10 +393,10 @@ for name, param in model.named_parameters():
     # plt.show()
     # plt.bar(range(1000), freq_fpe3m1[0].detach().cpu().numpy())
     # plt.show()
-    print(name)
-    print("origin and fpe3m1:", cosine_similarity_matrix(freq_origin, freq_fpe3m1))
-    print("origin and fpe2m2:", cosine_similarity_matrix(freq_origin, freq_fpe2m2))
-    print("origin and fpe1m3:", cosine_similarity_matrix(freq_origin, freq_fpe1m3))
+    # print(name)
+    # print("origin and fpe3m1:", cosine_similarity_matrix(freq_origin, freq_fpe3m1))
+    # print("origin and fpe2m2:", cosine_similarity_matrix(freq_origin, freq_fpe2m2))
+    # print("origin and fpe1m3:", cosine_similarity_matrix(freq_origin, freq_fpe1m3))
     # print("origin and fpe3m1:", cosine_similarity_matrix(freq_origin, freq_fpe3m1))
     # print("origin and int5:", cosine_similarity_matrix(freq_origin, freq_int5))
     # break
@@ -602,4 +608,43 @@ for name, param in model.named_parameters():
     plt.figure(figsize=(20, 5))
     plt.hist(norm[0].detach().cpu().numpy(), bins=5000)
     break
+# %%
+import torch
+import numpy as np
+e2m2 = torch.tensor([0,1/2,1,3/2,2,5/2,3,7/2,4,5,6,7,8,10,12,14]) 
+e3m1 = torch.tensor([0,1/16,2/16,3/16,1/4,3/8,1/2,3/4,1,3/2,2,3,4,6,8,12]) * 14/12
+int5 = torch.tensor([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]) * 14/15
+# %%
+import matplotlib.pyplot as plt
+plt.figure(figsize=(20, 5))
+e2m2 = e2m2.numpy()
+e3m1 = e3m1.numpy()
+int5 = int5.numpy()
+plt.plot(e2m2, [1]*len(e2m2), 'ro')
+plt.plot(e3m1, [2]*len(e3m1), 'bo')
+plt.plot(int5, [3]*len(int5), 'go')
+# not plot y axis
+plt.yticks([])
+plt.show()
+
+# %%
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+
+# 均值和标准差
+mu = 0
+sigma = 1
+
+# 在均值附近生成数据点
+x = np.linspace(mu - 3 * sigma, mu + 3 * sigma, 100)
+# 计算高斯分布的概率密度函数值
+y = norm.pdf(x, mu, sigma)
+
+plt.plot(x, y)
+plt.title('Gaussian Distribution (Normal Distribution)')
+plt.xlabel('x')
+plt.ylabel('Probability Density')
+plt.show()
+
 # %%

@@ -131,7 +131,7 @@ class GPTQ:
         
         
 @torch.no_grad()
-def gptq_fwrd(model, dataloader, dev, args):
+def gptq_fwrd(model, dataloader, dev, args,power_scales=None):
     '''
     From GPTQ repo 
     TODO: Make this function general to support both OPT and LLaMA models
@@ -211,6 +211,8 @@ def gptq_fwrd(model, dataloader, dev, args):
                 ['mlp.down_proj.module']
             ]
     for i in range(len(layers)):
+        if power_scales is not None:
+            power_scale = power_scales[i]
         print(f'\nLayer {i}:', flush=True, end=' ')
         layer = layers[i].to(dev)
         full = quant_utils.find_qlayers(layer, layers=[torch.nn.Linear])
@@ -230,7 +232,7 @@ def gptq_fwrd(model, dataloader, dev, args):
                 gptq[name] = GPTQ(subset[name])
                 gptq[name].quantizer = quant_utils.WeightQuantizer()
                 gptq[name].quantizer.configure(
-                    layer_weight_bits, perchannel=True, sym=layer_weight_sym, mse=args.w_clip, quant_func=args.quant_func
+                    layer_weight_bits, perchannel=True, sym=layer_weight_sym, mse=args.w_clip, quant_func=args.quant_func, power_scale=power_scale[name.split('.')[-2]] if power_scales else None
                 )
 
             def add_batch(name):
@@ -246,10 +248,7 @@ def gptq_fwrd(model, dataloader, dev, args):
                 h.remove()
 
             for name in subset:
-                if args.down_groupsize > 0 and 'down_proj' in name:
-                        layer_w_groupsize = args.down_groupsize
-                else:
-                    layer_w_groupsize = args.w_groupsize
+                layer_w_groupsize = args.w_groupsize
                 
                 gptq[name].fasterquant(
                     percdamp=args.percdamp, groupsize=layer_w_groupsize, actorder=args.act_order, static_groups=False
@@ -309,7 +308,8 @@ def rtn_fwrd(model, dev, args,power_scales=None):
                 if args.quant_func == 'fpe2m2':
                     w = sym_quant_fpe2m2(w)
                 elif args.quant_func == 'int':
-                    w = int4_quant(w,args.w_bits,-1)
+                    quantizer.find_params(W)
+                    w = quantizer.quantize(W).to(next(iter(layer.parameters())).dtype)
             
             
             subset[name].weight.data = w

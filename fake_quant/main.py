@@ -37,7 +37,7 @@ def main():
                 seed=args.seed, model=args.model,
                 seqlen=model.seqlen, eval_mode=False
             )
-            quantizers = gptq_utils.gptq_fwrd(model, trainloader, utils.DEV, args)
+            quantizers = gptq_utils.gptq_fwrd(model, trainloader, utils.DEV, args,power_scales=power_scales)
             save_dict["w_quantizers"] = quantizers
         else: # RTN Weight Quantization
             quantizers = gptq_utils.rtn_fwrd(model, utils.DEV, args,power_scales=power_scales)
@@ -82,6 +82,7 @@ def main():
                 if args.int8_down_proj:
                     layer_input_bits = 8
                 layer_groupsize = down_proj_groupsize
+            qlayers[name].runtime_smooth = args.a_runtime_smooth
             qlayers[name].quantizer.configure(bits=layer_input_bits,
                                               groupsize=layer_groupsize,
                                               sym=layer_a_sym,
@@ -123,8 +124,6 @@ def main():
 
     if len(args.tasks) == 1:
         args.tasks = args.tasks[0].split(',')  
-    print(ALL_TASKS)
-    # task_names = lm_eval_utils.pattern_match(args.tasks, ALL_TASKS)
     task_names = args.tasks
     results = lm_eval.simple_evaluate(hflm, tasks=task_names, batch_size=args.lm_eval_batch_size)['results']
 

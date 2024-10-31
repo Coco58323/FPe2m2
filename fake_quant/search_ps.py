@@ -23,34 +23,31 @@ def auto_config_search(module):
             loss = (weight-w).float().pow(2).mean(dim=-1,keepdim=True)
             recon_loss.append(loss)
         recon_loss = torch.cat(recon_loss, dim=-1)
-        _, best_idx = torch.min(recon_loss, 1)
+        _, best_idx = torch.min(recon_loss, dim=-1,keepdim=True)
         pow_scale = (best_idx+50)/100
+        # print(f"Best power scale: {pow_scale}")
         return pow_scale
 
     scales = {}
-    if isinstance(module, LlamaDecoderLayer):
         # attention input
-        scales["q_proj"] = _auto_get_pow_scale(module.self_attn.q_proj.weight)
-        scales["k_proj"] = _auto_get_pow_scale(module.self_attn.k_proj.weight)
-        scales["v_proj"] = _auto_get_pow_scale(module.self_attn.v_proj.weight)
-        gc.collect()
-        torch.cuda.empty_cache()
-        # attn out
-        scales["o_proj"] = _auto_get_pow_scale(module.self_attn.o_proj.weight)
-        gc.collect()
-        torch.cuda.empty_cache()
-        # fc1
-        scales["gate_proj"] = _auto_get_pow_scale(module.mlp.gate_proj.weight)
-        scales["up_proj"] = _auto_get_pow_scale(module.mlp.up_proj.weight)
-        gc.collect()
-        torch.cuda.empty_cache()
-        # fc2
-        scales["down_proj"] = _auto_get_pow_scale(module.mlp.down_proj.weight)
-        gc.collect()
-        torch.cuda.empty_cache()
-
-    else:
-        raise NotImplementedError(f"{type(module)} not supported yet!")
+    scales["q_proj"] = _auto_get_pow_scale(module.self_attn.q_proj.weight)
+    scales["k_proj"] = _auto_get_pow_scale(module.self_attn.k_proj.weight)
+    scales["v_proj"] = _auto_get_pow_scale(module.self_attn.v_proj.weight)
+    gc.collect()
+    torch.cuda.empty_cache()
+    # attn out
+    scales["o_proj"] = _auto_get_pow_scale(module.self_attn.o_proj.weight)
+    gc.collect()
+    torch.cuda.empty_cache()
+    # fc1
+    scales["gate_proj"] = _auto_get_pow_scale(module.mlp.gate_proj.weight)
+    scales["up_proj"] = _auto_get_pow_scale(module.mlp.up_proj.weight)
+    gc.collect()
+    torch.cuda.empty_cache()
+    # fc2
+    scales["down_proj"] = _auto_get_pow_scale(module.mlp.down_proj.weight)
+    gc.collect()
+    torch.cuda.empty_cache()
 
     return scales
 
@@ -61,10 +58,7 @@ def get_named_linears(module):
 
 
 def get_blocks(model):
-    if model.__class__.__name__ == "LlamaForCausalLM":
-        layers = model.model.layers
-    else:
-        raise NotImplementedError(type(model))
+    layers = model.model.layers
     return layers
 
 

@@ -214,10 +214,6 @@ def sym_quant_fpe2m2_ps(w, groupsize=-1,power_scale=1):
 
 
 
-
-
-
-
 def sym_quant_fpe4m0(w, groupsize=-1):
     fp8_scales = w.abs().max(dim=-1, keepdim=True)[0]
     fp8_scales.div_(torch.finfo(torch.float8_e4m3fn).max)
@@ -302,19 +298,22 @@ def sym_quant(x, scale, maxq):
 def sym_dequant(q, scale):
     return scale * q
 
-def sym_quant_fpe2m2_fake(x,scale):
+def sym_quant_fpe2m2_fake(x,scale,power_scale=1):
     scale = scale.to(x.device)
     norm = x / scale
-    w, w_scale = get_scale(norm,5,2,0)
+    # norm_pow = norm.abs().pow(power_scale).mul(torch.sign(norm))
+    norm_scaled = norm.mul(14).clamp(-14,14)
+    w, w_scale = get_scale(norm_scaled,5,2,0)
     w=(w/w_scale).round()
     w_sim=w.mul(w_scale)
-    return w_sim, scale
+    w_sim = w_sim.div(14)
+    # w_sim = norm_sim.abs().pow(1/power_scale).mul(torch.sign(norm_sim))
+    w_sim = w_sim.mul(scale)
+    return w_sim
 
 def sym_dequant_fpe2m2(q, scale):
     return scale * q
 
-def sym_quant_dequant_fpe2m2(x, scale):
-    return sym_dequant_fpe2m2(*sym_quant_fpe2m2_fake(x, scale))
 
 def sym_quant_dequant(x, scale, maxq):
     return sym_dequant(*sym_quant(x, scale, maxq))
@@ -569,19 +568,11 @@ class ActQuantWrapper(torch.nn.Module):
         self.out_quantizer = ActQuantizer()
         self.register_buffer('had_K', torch.tensor(0))
         self._buffers['had_K'] = None
-        self.K = 1
-        self.online_full_had = False
-        self.online_partial_had = False
-        self.had_dim = 0
-        self.fp32_had = False
         self.runtime_smooth = False
         self.out_runtime_smooth = False
         self.per_tensor = False
-        self.quant_scales = False
-        self.reorder = False
-        self.act_scale_g128 = False
+        self.act_scale_g128 = True
         self.scale_groupsize = 128
-        self.static = False
 
     def extra_repr(self) -> str:
         str_ = f'Input Quantizer Bits: {self.quantizer.bits}'
@@ -603,9 +594,6 @@ class ActQuantWrapper(torch.nn.Module):
                 else:
                     act_scales = x.abs().max(dim=1,keepdim=True)[0]
                 act_scales.clamp_(min=1e-5)
-                if self.quant_scales:
-                    max_scale = act_scales.max(dim=-1, keepdim=True)[0] / 16
-                    act_scales.div_(max_scale).ceil_().mul_(max_scale)
                 if self.act_scale_g128:
                     index = torch.argsort(act_scales, dim=-1, descending=True)
                     act_scales = torch.gather(act_scales, -1, index)
@@ -621,20 +609,17 @@ class ActQuantWrapper(torch.nn.Module):
                     reverse_index = torch.argsort(index, dim=-1)
                     act_scales = torch.gather(act_scales, -1, reverse_index)
                 x = x / act_scales
-            if self.reorder:
-                act_scales = x.abs().max(dim=1,keepdim=True)[0].repeat(1, x.shape[1],1)
-                index = torch.argsort(act_scales, dim=-1, descending=True)
-                x = torch.gather(x, -1, index)
+                x = x / 10
 
-            q_max = torch.finfo(torch.float8_e4m3fn).max
-
-            
-            x = x.clamp(min=-q_max+1, max=q_max-1).to(torch.float8_e4m3fn).to(torch.float16)
+            q_max = torch.finfo(torch.float8_e4m3fn).max-10
+            scale = x.abs().max(dim=-1, keepdim=True)[0]
+            scale = scale.clamp(min=1e-5).div(q_max)
+            x = x.div(scale).clamp(min=-q_max+1, max=q_max-1).to(torch.float8_e4m3fn).to(torch.float16).mul(scale)
+            # x = x.clamp(min=-q_max+1, max=q_max-1).to(torch.float8_e4m3fn).to(torch.float16)
             if self.runtime_smooth:
                 x = x * act_scales
-            if self.reorder:
-                inverse_index = torch.argsort(index, dim=-1)
-                x = torch.gather(x, -1, inverse_index)
+                x = x * 10
+
             self.quantizer.free()
 
         x = self.module(x).to(x_dtype)
@@ -670,7 +655,8 @@ class WeightQuantizer(torch.nn.Module):
     def configure(
         self,
         bits, perchannel=False, sym=True,
-        mse=False, norm=2.4, grid=100, maxshrink=.8, quant_func='int'
+        mse=False, norm=2.4, grid=100, maxshrink=.8, 
+        quant_func='int', power_scale=1
     ):
         self.bits = bits
         self.perchannel = perchannel
@@ -680,10 +666,13 @@ class WeightQuantizer(torch.nn.Module):
         self.grid = grid
         self.maxshrink = maxshrink
         self.quant_func = quant_func
+        self.power_scale = power_scale
         if sym:
             self.maxq = torch.tensor(2**(bits-1)-1)
         else:
             self.maxq = torch.tensor(2**bits - 1)
+        if quant_func == 'fpe2m2':
+            self.maxq = torch.tensor(1)
 
     def find_params(self, x):
         if self.bits == 16:
@@ -722,7 +711,12 @@ class WeightQuantizer(torch.nn.Module):
                 if self.sym:
                     scale1 = xmax1 / self.maxq
                     zero1 = torch.zeros_like(scale1)
-                    q = sym_quant_dequant(x, scale1.unsqueeze(1), self.maxq)
+                    if self.quant_func == 'fpe2m2':
+                        q = sym_quant_fpe2m2_fake(x, scale1.unsqueeze(1))
+                    elif self.quant_func == 'int':
+                        q = sym_quant_dequant(x, scale1.unsqueeze(1), self.maxq)
+                    else:
+                        raise RuntimeError('Unknown quantization function')
                 else:
 
                     scale1 = (xmax1 - xmin1) / self.maxq
@@ -753,6 +747,8 @@ class WeightQuantizer(torch.nn.Module):
     def quantize(self, x):
         x_dtype = x.dtype
         if self.ready() and self.bits < 16:
+            if self.quant_func == 'fpe2m2':
+                return sym_quant_fpe2m2_fake(x, self.scale,self.power_scale)
             if self.sym:
                 return sym_quant_dequant(x, self.scale, self.maxq).to(x_dtype)
             return asym_quant_dequant(x, self.scale, self.zero, self.maxq).to(x_dtype)
