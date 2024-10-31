@@ -64,7 +64,7 @@ def get_layers(model):
     raise NotImplementedError
 
 
-def get_model(model_name, hf_token):
+def get_model(model_name, hf_token=None):
     torch.nn.init.kaiming_uniform_ = skip
     torch.nn.init.uniform_ = skip
     torch.nn.init.normal_ = skip

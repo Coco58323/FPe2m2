@@ -1,5 +1,4 @@
 import math
-import time
 import tqdm
 import torch
 import torch.nn as nn
@@ -9,7 +8,7 @@ import logging
 
 torch.backends.cuda.matmul.allow_tf32 = False
 torch.backends.cudnn.allow_tf32 = False
-from quant_utils import int4_quant,sym_quant_fpe2m2,sym_quant_fpe2m2_ps
+from quant_utils import sym_quant_fpe2m2,sym_quant_fpe2m2_ps
 
 class GPTQ:
 

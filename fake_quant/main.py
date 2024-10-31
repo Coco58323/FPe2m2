@@ -14,7 +14,7 @@ def main():
         import wandb
         wandb.init(project=args.wandb_project, name=args.wandb_id)
         wandb.config.update(args)
-        
+
     transformers.set_seed(args.seed)
     model = model_utils.get_model(args.model, args.hf_token)
     model.eval()
@@ -22,7 +22,6 @@ def main():
         import torch.nn as nn
         model.lm_head.weight = nn.Parameter(model.model.embed_tokens.weight.clone())
 
-    quant_utils.add_actquant(model) #Add Activation Wrapper to the model as the rest of the code assumes it is present
 
     if args.power_scale:
         power_scales = search_ps.run_config_search(model)
@@ -30,23 +29,24 @@ def main():
         power_scales = None
     if args.w_bits < 16:
         save_dict = {}
-        if not args.w_rtn: # GPTQ Weight Quantization
+        if args.load_qmodel_path: # Load Quantized Rotated Model
+            save_dict = torch.load(args.load_qmodel_path)
+            model.load_state_dict(save_dict)
+        elif not args.w_rtn: # GPTQ Weight Quantization
             # assert "llama" in args.model, "Only llama is supported for GPTQ!"
             trainloader = data_utils.get_loaders(
                 args.cal_dataset, nsamples=args.nsamples,
                 seed=args.seed, model=args.model,
                 seqlen=model.seqlen, eval_mode=False
             )
-            quantizers = gptq_utils.gptq_fwrd(model, trainloader, utils.DEV, args,power_scales=power_scales)
-            save_dict["w_quantizers"] = quantizers
+            _ = gptq_utils.gptq_fwrd(model, trainloader, utils.DEV, args,power_scales=power_scales)
         else: # RTN Weight Quantization
-            quantizers = gptq_utils.rtn_fwrd(model, utils.DEV, args,power_scales=power_scales)
-            save_dict["w_quantizers"] = quantizers
+            _ = gptq_utils.rtn_fwrd(model, utils.DEV, args,power_scales=power_scales)
             
         if args.save_qmodel_path:
-            save_dict["model"] = model.state_dict()
-            torch.save(save_dict, args.save_qmodel_path)
+            torch.save(model.state_dict(), args.save_qmodel_path)
 
+    quant_utils.add_actquant(model) #Add Activation Wrapper to the model as the rest of the code assumes it is present
 
     # Add Input Quantization
     if args.a_bits < 16 or args.v_bits < 16:
